@@ -18,3 +18,5 @@ For quick reference this is the command I use to run ctags:
 MVP Demo for ctags browser. CD into the directory and run `python3 browse_ctags.py`. Screen will be black. Use arrow key to navigate.
 Highlight a ctag, press enter, and it will open up VIM at the line of that tag.
 
+
+![](https://github.com/BnetButter/browse_ctags/blob/master/browse_ctags_v0.gif)
