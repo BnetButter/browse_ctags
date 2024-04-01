@@ -19,4 +19,4 @@ MVP Demo for ctags browser. CD into the directory and run `python3 browse_ctags.
 Highlight a ctag, press enter, and it will open up VIM at the line of that tag.
 
 
-![](https://github.com/BnetButter/browse_ctags/blob/master/browse_ctags_v0.gif)
+![gif](https://github.com/BnetButter/browse_ctags/blob/master/browse_ctags_v0.gif)
