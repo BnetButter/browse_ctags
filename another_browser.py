@@ -203,6 +203,8 @@ def main():
 
             keyname = curses.keyname(char).decode()
 
+            if keyname == "q":
+                exit()
             if keyname == "k" and len(current_content):
                 if app.current_pos > 0:
                     app.current_pos -= 1
