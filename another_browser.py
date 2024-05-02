@@ -4,13 +4,23 @@ import sys
 import json
 import subprocess
 
+def editor(filename, line):
+    return f"vim +{line} {filename}"
 
 class View:
 
     def __init__(self, graph):
         self.stack = deque()
         self.stack.append(graph)
-    
+
+    def start_editor(self, index):
+        path = self.current[index]["path"]
+        line_no = self.current[index]["line"]
+        command = editor(path, line_no)
+        subprocess.call(command, shell=True)
+        exit()
+
+
     @property
     def current(self):
         return self.stack[-1]
@@ -20,8 +30,8 @@ class View:
     
     def descend(self, index) -> "View":
         if self.current[index]["children"]:
-            
             self.stack.append(self.current[index]["children"])
+        
         return self
     
     def ascend(self) -> "View":
@@ -45,9 +55,7 @@ class View:
         if len(self.stack) == 1:
             return []
         return [item["name"] for item in self.stack[-2]]
-    
 
-        
 
 class App:
 
@@ -75,6 +83,7 @@ class App:
         mid_y = max_y // 2
 
         self.panel_a = curses.newwin(max_y, panel_width, 0, panel_a_x)
+        self.panel_a.clear()
         self.panel_b = curses.newwin(max_y, panel_width, 0, panel_b_x)
 
         self.panel_b.scrollok(True)
@@ -126,7 +135,6 @@ class App:
                     panel.addstr(1 + idx, 1, line)
                 except: # Happens when we overflow on Y direction
                     break
-        panel.box()
 
 
 def parse_tags(items:list):
@@ -181,6 +189,10 @@ def main():
     graph = parse_tags(data)
 
     def _main(stdscr):
+        curses.start_color()
+
+     
+
         view = View(graph)
         app = App(stdscr)
         # Example usage with dummy content
@@ -194,20 +206,21 @@ def main():
                     app.current_pos -= 1
                     if app.current_pos < app.top_line:
                         app.top_line -= 1
-
-
             elif char == curses.KEY_DOWN:
                 if app.current_pos < len(current_content) - 1:
                     app.current_pos += 1
                     if app.current_pos == app.top_line + app.height - 3:
                         app.top_line += 1
-            elif char == ord("\n"):
+            elif char == curses.KEY_RIGHT:
                 view.descend(app.current_pos)
                 app.current_pos = 0
                 app.top_line = 0
-            elif char == 27: # ESCAPE
+            elif char == curses.KEY_LEFT: # ESCAPE
                 view.ascend()
                 app.current_pos = 0
+            
+            elif char == ord("\n"):
+                view.start_editor(app.current_pos)
 
             app.render(view.parent_view(), view.current_view(), view.child_view(app.current_pos))
     
