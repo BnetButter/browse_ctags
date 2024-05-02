@@ -2,6 +2,7 @@ import curses
 from collections import deque
 import sys
 import json
+import subprocess
 
 
 class View:
@@ -127,43 +128,91 @@ class App:
                     break
         panel.box()
 
+
+def parse_tags(items:list):
+    """
+    Take each individual JSON element and add it as a child of its parent
+    """
+
+    for item in items:
+        item["children"] = []
+        if "scope" in item:
+            item["scope"] = item["scope"].split(".")
+        else:
+            item["scope"] = []
+
+    for i, item in enumerate(items):
+        if item["scope"]:
+            last_item = item["scope"][-1]
+            last_item_index = i - 1
+            while last_item_index >= 0:
+                last = items[last_item_index]
+                if last["name"] == last_item and len(last["scope"]) != len(item["scope"]):
+                    break
+                last_item_index -= 1
+            
+            items[last_item_index]["children"].append(item)
+
+    return [ item for item in items if not item["scope"] ]
+
+def run_ctags(file_path):
+    # Construct the command
+    command = ["ctags", "--output-format=json", "--sort=off", "--fields=+n", file_path]
+    
+    # Run the command and capture the output
+    result = subprocess.check_output(" ".join(command), shell=True)
+
+    # each line is a JSON object
+    result = str(result, encoding="utf-8")
+    result = result.split("\n")
+
+    return [json.loads(line) for line in result if line]
+
+
 # Main function to start the curses application
-def main(stdscr):
+def main():
+
+    filename = sys.argv[1]
+    data = run_ctags(filename)
     
-    with open(sys.argv[1]) as fp:
-        graph = json.load(fp)
+    if not data:
+        exit(1)
     
-    view = View(graph)
-    app = App(stdscr)
-    # Example usage with dummy content
+    graph = parse_tags(data)
 
-    while True:
-        current_content = view.current_view()
-        char = stdscr.getch()
-        
-     
-        
-        if char == curses.KEY_UP and len(current_content):
-            if app.current_pos > 0:
-                app.current_pos -= 1
-                if app.current_pos < app.top_line:
-                    app.top_line -= 1
-                    
+    def _main(stdscr):
+        view = View(graph)
+        app = App(stdscr)
+        # Example usage with dummy content
 
-        elif char == curses.KEY_DOWN:
-            if app.current_pos < len(current_content) - 1:
-                app.current_pos += 1
-                if app.current_pos == app.top_line + app.height - 3:
-                    app.top_line += 1
-        elif char == ord("\n"):
-            view.descend(app.current_pos)
-            app.current_pos = 0
-        elif char == 27: # ESCAPE
-            view.ascend()
-            app.current_pos = 0
+        while True:
+            current_content = view.current_view()
+            char = stdscr.getch()
+            
+            if char == curses.KEY_UP and len(current_content):
+                if app.current_pos > 0:
+                    app.current_pos -= 1
+                    if app.current_pos < app.top_line:
+                        app.top_line -= 1
 
-        app.render(view.parent_view(), view.current_view(), view.child_view(app.current_pos))
+
+            elif char == curses.KEY_DOWN:
+                if app.current_pos < len(current_content) - 1:
+                    app.current_pos += 1
+                    if app.current_pos == app.top_line + app.height - 3:
+                        app.top_line += 1
+            elif char == ord("\n"):
+                view.descend(app.current_pos)
+                app.current_pos = 0
+                app.top_line = 0
+            elif char == 27: # ESCAPE
+                view.ascend()
+                app.current_pos = 0
+
+            app.render(view.parent_view(), view.current_view(), view.child_view(app.current_pos))
+    
+    curses.wrapper(_main)
 
 # Run the curses application
 if __name__ == "__main__":
-    curses.wrapper(main)
+    main()
