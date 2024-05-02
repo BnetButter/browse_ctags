@@ -56,6 +56,11 @@ class App:
         curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)  # For highlighting
 
         max_y, max_x = self.stdscr.getmaxyx()
+
+        self.height = max_y
+        self.max_x = max_x
+
+        self.top_line = 0
         
         # Calculate widths for the three panels
         panel_width = max_x // 3
@@ -70,6 +75,9 @@ class App:
 
         self.panel_a = curses.newwin(max_y, panel_width, 0, panel_a_x)
         self.panel_b = curses.newwin(max_y, panel_width, 0, panel_b_x)
+
+        self.panel_b.scrollok(True)
+
         self.panel_c = curses.newwin(max_y, max_x - 2 * panel_width, 0, panel_c_x)  # Ensure Panel C fills the rest
 
     def render(self, parent_content: list[str], current_content: list[str], file_content: str) -> None:
@@ -81,7 +89,9 @@ class App:
         self.fill_panel(self.panel_a, parent_content)
 
         # Fill in the content for Panel B, with highlighting
-        self.fill_panel(self.panel_b, current_content, highlight_index=self.current_pos)
+        #self.fill_panel(self.panel_b, current_content, highlight_index=self.current_pos)
+
+        self.fill_panel_scroll(self.top_line, self.current_pos, current_content)
 
         # Fill in the content for Panel C
         self.fill_panel(self.panel_c, file_content, is_string=True)
@@ -90,6 +100,21 @@ class App:
         self.panel_a.refresh()
         self.panel_b.refresh()
         self.panel_c.refresh()
+    
+
+    def fill_panel_scroll(self, top_line, selected_row, content):
+        self.panel_b.clear()
+        height, width = self.stdscr.getmaxyx()
+        for i in range(top_line, min(len(content), top_line + height - 2)):
+            real_i = i - top_line
+            if i == selected_row:
+                self.panel_b.addstr(1+real_i, 1, content[i] + "\n", curses.A_REVERSE)
+            else:
+                self.panel_b.addstr(1+real_i, 1, content[i] + "\n")
+
+        self.panel_b.refresh()
+
+
 
     def fill_panel(self, panel, content, highlight_index=None, is_string=False):
         for idx, line in enumerate(content):
@@ -111,26 +136,34 @@ def main(stdscr):
     view = View(graph)
     app = App(stdscr)
     # Example usage with dummy content
-   
 
     while True:
         current_content = view.current_view()
         char = stdscr.getch()
+        
+     
+        
         if char == curses.KEY_UP and len(current_content):
-            app.current_pos = (app.current_pos - 1) % len(current_content)
+            if app.current_pos > 0:
+                app.current_pos -= 1
+                if app.current_pos < app.top_line:
+                    app.top_line -= 1
+                    
+
         elif char == curses.KEY_DOWN:
-            app.current_pos = (app.current_pos + 1) % len(current_content)
+            if app.current_pos < len(current_content) - 1:
+                app.current_pos += 1
+                if app.current_pos == app.top_line + app.height - 3:
+                    app.top_line += 1
         elif char == ord("\n"):
             view.descend(app.current_pos)
             app.current_pos = 0
         elif char == 27: # ESCAPE
             view.ascend()
             app.current_pos = 0
-  
+
         app.render(view.parent_view(), view.current_view(), view.child_view(app.current_pos))
 
 # Run the curses application
 if __name__ == "__main__":
-
-
     curses.wrapper(main)
