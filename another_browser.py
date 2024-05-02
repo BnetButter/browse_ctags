@@ -18,7 +18,7 @@ class View:
         line_no = self.current[index]["line"]
         command = editor(path, line_no)
         subprocess.call(command, shell=True)
-        exit()
+        
 
 
     @property
@@ -200,28 +200,29 @@ def main():
         while True:
             current_content = view.current_view()
             char = stdscr.getch()
-            
-            if char == curses.KEY_UP and len(current_content):
+
+            keyname = curses.keyname(char).decode()
+
+            if keyname == "k" and len(current_content):
                 if app.current_pos > 0:
                     app.current_pos -= 1
                     if app.current_pos < app.top_line:
                         app.top_line -= 1
-            elif char == curses.KEY_DOWN:
+            elif keyname == "j":
                 if app.current_pos < len(current_content) - 1:
                     app.current_pos += 1
                     if app.current_pos == app.top_line + app.height - 3:
                         app.top_line += 1
-            elif char == curses.KEY_RIGHT:
+            elif keyname == "l":
                 view.descend(app.current_pos)
                 app.current_pos = 0
                 app.top_line = 0
-            elif char == curses.KEY_LEFT: # ESCAPE
+            elif keyname == "h": # ESCAPE
                 view.ascend()
                 app.current_pos = 0
             
             elif char == ord("\n"):
                 view.start_editor(app.current_pos)
-
             app.render(view.parent_view(), view.current_view(), view.child_view(app.current_pos))
     
     curses.wrapper(_main)
