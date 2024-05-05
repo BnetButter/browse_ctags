@@ -1,109 +1,239 @@
 import curses
-import os
-import subprocess
+from collections import deque
+import sys
 import json
+import subprocess
 
-def draw_files(window, current_row, files, active):
-    window.clear()
-    for idx, row in enumerate(files):
-        if idx == current_row and active:
-            window.attron(curses.color_pair(1))
-            window.addstr(idx, 0, row)
-            window.attroff(curses.color_pair(1))
+from typing import List
+
+def editor(filename, line):
+    return f"vim +{line} {filename}"
+
+class View:
+
+    def __init__(self, graph):
+        self.stack = deque()
+        self.stack.append(graph)
+
+    def start_editor(self, index):
+        path = self.current[index]["path"]
+        line_no = self.current[index]["line"]
+        command = editor(path, line_no)
+        subprocess.call(command, shell=True)
+        
+
+
+    @property
+    def current(self):
+        return self.stack[-1]
+
+    def current_view(self):
+        return [ item["name"] for item in self.current ]
+    
+    def descend(self, index) -> "View":
+        if self.current[index]["children"]:
+            self.stack.append(self.current[index]["children"])
+        
+        return self
+    
+    def ascend(self) -> "View":
+        if len(self.stack) == 1:
+            return self
+        self.stack.pop()
+        return self
+
+    def child_view(self, index):
+        if self.current[index]["children"]:
+            return [ item["name"] for item in self.current[index]["children"] ]
         else:
-            window.addstr(idx, 0, row)
-    window.refresh()
+            elt = self.current[index]
+            filename = elt["path"]
+            with open(filename) as fp:
+                line_no = elt["line"] - 1
+                return fp.readlines()[line_no:]
 
-def render_tag_tree(window, tags, indent=0, row=0):
-    positions = []
-    for tag in tags:
-        if row < curses.LINES and indent < curses.COLS // 2:
-            window.addstr(row, indent, tag['name'])
-            positions.append((row, indent, tag['name'], tag["path"], tag["line"]))
-            row += 1
-            if 'children' in tag and tag['children']:
-                child_positions, row = render_tag_tree(window, list(tag['children'].values()), indent + 2, row)
-                positions.extend(child_positions)
-    return positions, row
+     
+    def parent_view(self):
+        if len(self.stack) == 1:
+            return []
+        return [item["name"] for item in self.stack[-2]]
 
-def highlight_tag(window, positions, current_row):
-    if 0 <= current_row < len(positions):
-        row, indent, name, file, line = positions[current_row]
-        window.attron(curses.color_pair(1))
-        window.addstr(row, indent, name)
-        window.attroff(curses.color_pair(1))
-    window.refresh()
 
-def execute_ctags(file_path):
-    cmd = f"ctags --output-format=json --sort=off --fields=+n {file_path} | python3 parse_tags.py"
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return [{"name": "Error parsing tag output", "children": {}}]
+class App:
 
-def file_explorer(stdscr):
-    curses.curs_set(0)
-    curses.start_color()
-    curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)
-    stdscr.clear()
+    def __init__(self, stdscr):
+        self.stdscr = stdscr
+        self.current_pos = 0
+        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)  # For highlighting
 
-    current_file_row = 0
-    current_tag_row = 0
-    path = os.getcwd()
-    files = os.listdir(path)
-    files = ["[D] " + file if os.path.isdir(os.path.join(path, file)) else file for file in files]
+        max_y, max_x = self.stdscr.getmaxyx()
 
-    file_window = curses.newwin(curses.LINES, curses.COLS // 2, 0, 0)
-    tag_window = curses.newwin(curses.LINES, curses.COLS // 2, 0, curses.COLS // 2)
+        self.height = max_y
+        self.max_x = max_x
 
-    focus_on_files = True
-    tags = []
+        self.top_line = 0
+        
+        # Calculate widths for the three panels
+        panel_width = max_x // 3
+        panel_a_x = 0  # Panel A starts at the left edge
+        panel_b_x = panel_width  # Panel B starts where Panel A ends
+        panel_c_x = 2 * panel_width  # Panel C starts where Panel B ends
+        # Divide the screen into three panels
+        # Panel A and B are on the left, split horizontally
+        # Panel C is on the right
+        mid_x = max_x // 2
+        mid_y = max_y // 2
 
-    while True:
-        selected_file = os.path.join(path, files[current_file_row].replace("[D] ", ""))
-        if not os.path.isdir(selected_file):
-            tags = execute_ctags(selected_file)
+        self.panel_a = curses.newwin(max_y, panel_width, 0, panel_a_x)
+        self.panel_a.clear()
+        self.panel_b = curses.newwin(max_y, panel_width, 0, panel_b_x)
 
-        draw_files(file_window, current_file_row, files, focus_on_files)
-        tag_window.clear()
-        positions, _ = render_tag_tree(tag_window, tags)
-        if not focus_on_files:
-            highlight_tag(tag_window, positions, current_tag_row)
-        tag_window.refresh()
+        self.panel_b.scrollok(True)
 
-        key = stdscr.getch()
+        self.panel_c = curses.newwin(max_y, max_x - 2 * panel_width, 0, panel_c_x)  # Ensure Panel C fills the rest
 
-        if focus_on_files:
-            if key == curses.KEY_UP and current_file_row > 0:
-                current_file_row -= 1
-            elif key == curses.KEY_DOWN and current_file_row < len(files) - 1:
-                current_file_row += 1
-            elif key == curses.KEY_RIGHT:
-                focus_on_files = False
-            elif key == curses.KEY_ENTER or key in [10, 13]:
-                name = files[current_file_row].replace("[D] ", "")
-                new_path = os.path.join(path, name)
-                if os.path.isdir(new_path):
-                    path = new_path
-                    files = os.listdir(path)
-                    files = ["[D] " + file if os.path.isdir(os.path.join(path, file)) else file for file in files]
-                    current_file_row = 0
-                    tags = []
+    def render(self, parent_content: List[str], current_content: List[str], file_content: List[str], view:View) -> None:
+        self.panel_a.clear()
+        self.panel_b.clear()
+        self.panel_c.clear()
+
+        # Fill in the content for Panel A
+        self.fill_panel(self.panel_a, parent_content)
+
+        # Fill in the content for Panel B, with highlighting
+        #self.fill_panel(self.panel_b, current_content, highlight_index=self.current_pos)
+
+        self.fill_panel_scroll(self.top_line, self.current_pos, current_content, view)
+
+        # Fill in the content for Panel C
+        self.fill_panel(self.panel_c, file_content, is_string=True)
+
+        # Refresh panels to update the screen
+        self.panel_a.refresh()
+        self.panel_b.refresh()
+        self.panel_c.refresh()
+    
+
+    def fill_panel_scroll(self, top_line, selected_row, content, view):
+        self.panel_b.clear()
+        height, width = self.stdscr.getmaxyx()
+        for i in range(top_line, min(len(content), top_line + height - 2)):
+            real_i = i - top_line
+            if i == selected_row:
+                self.panel_b.addstr(1+real_i, 1, content[i] + "\n", curses.A_REVERSE)
+            else:
+                if view.current[i]["children"]:
+                    self.panel_b.addstr(1+real_i, 1, content[i] + "\n", curses.color_pair(2))
+                else:
+                    self.panel_b.addstr(1+real_i, 1, content[i] + "\n")
+
+        self.panel_b.refresh()
+
+
+
+    def fill_panel(self, panel, content, highlight_index=None, is_string=False):
+        for idx, line in enumerate(content):
+            if highlight_index == idx and not is_string:
+                panel.addstr(1 + idx, 1, line, curses.color_pair(1))
+            else:
+                try:
+                    panel.addstr(1 + idx, 1, line)
+                except: # Happens when we overflow on Y direction
+                    break
+
+
+def parse_tags(items:list):
+    """
+    Take each individual JSON element and add it as a child of its parent
+    """
+
+    for item in items:
+        item["children"] = []
+        if "scope" in item:
+            item["scope"] = item["scope"].split(".")
         else:
-            if key == curses.KEY_LEFT:
-                focus_on_files = True
-            elif key == curses.KEY_UP and current_tag_row > 0:
-                current_tag_row -= 1
-            elif key == curses.KEY_DOWN and current_tag_row < len(positions) - 1:
-                current_tag_row += 1
-            elif key == curses.KEY_ENTER or key in [10, 13]:
-                file, line = positions[current_tag_row][3], positions[current_tag_row][4]
-                cmd = f"vim {file} +{line}"
-                subprocess.run(cmd, shell=True)
-                exit()
+            item["scope"] = []
+
+    for i, item in enumerate(items):
+        if item["scope"]:
+            last_item = item["scope"][-1]
+            last_item_index = i - 1
+            while last_item_index >= 0:
+                last = items[last_item_index]
+                if last["name"] == last_item and len(last["scope"]) != len(item["scope"]):
+                    break
+                last_item_index -= 1
+            
+            items[last_item_index]["children"].append(item)
+
+    return [ item for item in items if not item["scope"] ]
+
+def run_ctags(file_path):
+    # Construct the command
+    command = ["ctags", "--output-format=json", "--sort=off", "--fields=+n", file_path]
+    
+    # Run the command and capture the output
+    result = subprocess.check_output(" ".join(command), shell=True)
+
+    # each line is a JSON object
+    result = str(result, encoding="utf-8")
+    result = result.split("\n")
+
+    return [json.loads(line) for line in result if line]
+
+
+# Main function to start the curses application
 def main():
-    curses.wrapper(file_explorer)
 
+    filename = sys.argv[1]
+    data = run_ctags(filename)
+    
+    if not data:
+        exit(1)
+    
+    graph = parse_tags(data)
+
+    def _main(stdscr):
+        curses.start_color()
+
+        curses.init_pair(2, curses.COLOR_CYAN, curses.COLOR_BLACK)     
+
+        view = View(graph)
+        app = App(stdscr)
+        # Example usage with dummy content
+
+        while True:
+            current_content = view.current_view()
+            char = stdscr.getch()
+
+            keyname = curses.keyname(char).decode()
+
+            if keyname == "q":
+                exit()
+            if keyname == "k" and len(current_content):
+                if app.current_pos > 0:
+                    app.current_pos -= 1
+                    if app.current_pos < app.top_line:
+                        app.top_line -= 1
+            elif keyname == "j":
+                if app.current_pos < len(current_content) - 1:
+                    app.current_pos += 1
+                    if app.current_pos == app.top_line + app.height - 3:
+                        app.top_line += 1
+            elif keyname == "l":
+                view.descend(app.current_pos)
+                app.current_pos = 0
+                app.top_line = 0
+            elif keyname == "h": # ESCAPE
+                view.ascend()
+                app.current_pos = 0
+            
+            elif char == ord("\n"):
+                view.start_editor(app.current_pos)
+            app.render(view.parent_view(), view.current_view(), view.child_view(app.current_pos), view)
+    
+    curses.wrapper(_main)
+
+# Run the curses application
 if __name__ == "__main__":
     main()
